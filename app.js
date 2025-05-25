@@ -1,5 +1,7 @@
 require('dotenv').config(); // Added for environment variable configuration
 const { Pool } = require('pg');
+const bcrypt = require('bcrypt'); // Added for password hashing
+const saltRounds = 10; // Define salt rounds for bcrypt
 
 const pool = new Pool({
   user: process.env.DB_USER,
@@ -24,24 +26,6 @@ async function createItem(details) { // Signature changed to accept a details ob
   } catch (err) {
     console.error('Error creating item:', err);
     throw err; // Re-throw the error
-  } finally {
-    if (client) {
-      client.release();
-    }
-  }
-}
-
-async function searchManufacturers(searchText) {
-  let client; // Define client here to be accessible in finally
-  try {
-    client = await pool.connect();
-    const queryText = 'SELECT * FROM manufacturers WHERE name ILIKE $1 OR address ILIKE $1';
-    const queryParams = [`%${searchText}%`];
-    const result = await client.query(queryText, queryParams);
-    return result.rows;
-  } catch (err) {
-    console.error('Error searching manufacturers:', err);
-    return []; // Return empty array on error or if no results
   } finally {
     if (client) {
       client.release();
@@ -105,9 +89,6 @@ async function updateItem(id, updates) { // Changed signature to (id, updates)
     }
 
     if (fields.length === 0) {
-      // No fields to update, perhaps return current item data or null if not found
-      // For consistency, could call readItem(id) here or simply return null if no update occurs.
-      // Let's return the current item by fetching it, to show it's unchanged or does not exist.
       return readItem(id);
     }
 
@@ -118,7 +99,7 @@ async function updateItem(id, updates) { // Changed signature to (id, updates)
     return result.rows.length > 0 ? result.rows[0] : null; // Returns items.*
   } catch (err) {
     console.error('Error updating item:', err);
-    throw err; // Re-throw error as per original CUD pattern for items
+    throw err; 
   } finally {
     if (client) {
       client.release();
@@ -143,7 +124,7 @@ async function getItemByBarcode(barcode) {
     return result.rows.length > 0 ? result.rows[0] : null;
   } catch (err) {
     console.error('Error getting item by barcode:', err);
-    return null; // Return null on error
+    return null; 
   } finally {
     if (client) {
       client.release();
@@ -151,7 +132,7 @@ async function getItemByBarcode(barcode) {
   }
 }
 
-async function deleteItem(id) { // deleteItem remains unchanged in this subtask
+async function deleteItem(id) { 
   let client;
   try {
     client = await pool.connect();
@@ -159,7 +140,7 @@ async function deleteItem(id) { // deleteItem remains unchanged in this subtask
     return result.rowCount > 0;
   } catch (err) {
     console.error('Error deleting item:', err);
-    return false; // Return false on error
+    return false; 
   } finally {
     if (client) {
       client.release();
@@ -185,7 +166,7 @@ async function searchItemsByName(searchText) {
     return result.rows;
   } catch (err) {
     console.error('Error searching items by name:', err);
-    return []; // Return empty array on error
+    return []; 
   } finally {
     if (client) {
       client.release();
@@ -194,7 +175,6 @@ async function searchItemsByName(searchText) {
 }
 
 // CRUD Functions for Manufacturers
-
 async function createManufacturer(name, address) {
   let client;
   try {
@@ -204,7 +184,7 @@ async function createManufacturer(name, address) {
     return result.rows[0];
   } catch (err) {
     console.error('Error creating manufacturer:', err);
-    throw err; // Re-throw the error
+    throw err; 
   } finally {
     if (client) {
       client.release();
@@ -221,7 +201,7 @@ async function readManufacturer(id) {
     return result.rows.length > 0 ? result.rows[0] : null;
   } catch (err) {
     console.error('Error reading manufacturer:', err);
-    return null; // Return null on error
+    return null; 
   } finally {
     if (client) {
       client.release();
@@ -247,18 +227,17 @@ async function updateManufacturer(id, newName, newAddress) {
     }
 
     if (fields.length === 0) {
-      // No fields to update, return current manufacturer data or null if not found
       return readManufacturer(id);
     }
 
-    values.push(id); // For WHERE id = $N
+    values.push(id); 
     const queryText = `UPDATE manufacturers SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`;
     
     const result = await client.query(queryText, values);
     return result.rows.length > 0 ? result.rows[0] : null;
   } catch (err) {
     console.error('Error updating manufacturer:', err);
-    throw err; // Re-throw the error
+    throw err; 
   } finally {
     if (client) {
       client.release();
@@ -275,7 +254,25 @@ async function deleteManufacturer(id) {
     return result.rowCount > 0;
   } catch (err) {
     console.error('Error deleting manufacturer:', err);
-    throw err; // Re-throw the error
+    throw err; 
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+async function searchManufacturers(searchText) {
+  let client; 
+  try {
+    client = await pool.connect();
+    const queryText = 'SELECT * FROM manufacturers WHERE name ILIKE $1 OR address ILIKE $1';
+    const queryParams = [`%${searchText}%`];
+    const result = await client.query(queryText, queryParams);
+    return result.rows;
+  } catch (err) {
+    console.error('Error searching manufacturers:', err);
+    return []; 
   } finally {
     if (client) {
       client.release();
@@ -284,16 +281,16 @@ async function deleteManufacturer(id) {
 }
 
 // Transaction Functions
-
-async function recordTransaction(overall_total_price, items_sold) {
+async function recordTransaction(overall_total_price, items_sold, cashier_id) { 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const transactionQuery = 'INSERT INTO transactions (overall_total_price) VALUES ($1) RETURNING id, transaction_date;';
-    const transactionResult = await client.query(transactionQuery, [overall_total_price]);
+    const transactionQuery = 'INSERT INTO transactions (overall_total_price, cashier_id) VALUES ($1, $2) RETURNING id, transaction_date, cashier_id;';
+    const transactionResult = await client.query(transactionQuery, [overall_total_price, cashier_id]);
     const transactionId = transactionResult.rows[0].id;
     const transactionDate = transactionResult.rows[0].transaction_date;
+    const recordedCashierId = transactionResult.rows[0].cashier_id; 
 
     for (const itemSold of items_sold) {
       const transItemQuery = 'INSERT INTO transaction_items (transaction_id, item_id, quantity_sold, price_per_unit_at_sale, line_item_total_price) VALUES ($1, $2, $3, $4, $5);';
@@ -304,11 +301,11 @@ async function recordTransaction(overall_total_price, items_sold) {
     }
 
     await client.query('COMMIT');
-    return { transactionId, transactionDate, overall_total_price, items_sold_count: items_sold.length };
+    return { transactionId, transactionDate, overall_total_price, cashier_id: recordedCashierId, items_sold_count: items_sold.length };
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error recording transaction:', err);
-    throw err; // Re-throw the error
+    throw err; 
   } finally {
     client.release();
   }
@@ -317,10 +314,15 @@ async function recordTransaction(overall_total_price, items_sold) {
 async function getTransactionDetails(transactionId) {
   const client = await pool.connect();
   try {
-    const transactionQuery = 'SELECT * FROM transactions WHERE id = $1;';
+    const transactionQuery = `
+      SELECT t.*, c.name as cashier_name 
+      FROM transactions t
+      LEFT JOIN cashiers c ON t.cashier_id = c.id
+      WHERE t.id = $1;
+    `;
     const transactionResult = await client.query(transactionQuery, [transactionId]);
     if (transactionResult.rows.length === 0) {
-      return null; // Transaction not found
+      return null; 
     }
     const transactionData = transactionResult.rows[0];
 
@@ -336,12 +338,96 @@ async function getTransactionDetails(transactionId) {
     return { transaction: transactionData, items: itemsData };
   } catch (err) {
     console.error('Error getting transaction details:', err);
-    return null; // Return null on error
+    return null; 
   } finally {
     client.release();
   }
 }
 
+// Cashier Management and Authentication Functions
+async function createCashier(name, password, address) { // Added address to signature
+  const client = await pool.connect();
+  try {
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+    // Updated SQL query and parameters to include address, and return address
+    const queryText = 'INSERT INTO cashiers (name, password_hash, address) VALUES ($1, $2, $3) RETURNING id, name, join_date, address;';
+    const result = await client.query(queryText, [name, passwordHash, address]);
+    return result.rows[0];
+  } catch (err) {
+    console.error('Error creating cashier:', err);
+    throw err; 
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+async function authenticateCashier(name, password) {
+  const client = await pool.connect();
+  try {
+    // Updated SQL query to select address
+    const queryText = 'SELECT id, name, password_hash, join_date, address FROM cashiers WHERE name = $1;';
+    const result = await client.query(queryText, [name]);
+    if (result.rows.length === 0) {
+      return null; 
+    }
+    const cashier = result.rows[0];
+    const match = await bcrypt.compare(password, cashier.password_hash);
+    if (match) {
+      // Updated returned object to include address
+      return { id: cashier.id, name: cashier.name, join_date: cashier.join_date, address: cashier.address };
+    } else {
+      return null; 
+    }
+  } catch (err) {
+    console.error('Error authenticating cashier:', err);
+    return null; 
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+async function getCashierById(cashierId) {
+  const client = await pool.connect();
+  try {
+    // Updated SQL query to select address
+    const queryText = 'SELECT id, name, join_date, address FROM cashiers WHERE id = $1;';
+    const result = await client.query(queryText, [cashierId]);
+    if (result.rows.length === 0) {
+      return null; 
+    }
+    // Returned object already includes address due to SELECT * or specific selection
+    return result.rows[0];
+  } catch (err) {
+    console.error('Error getting cashier by ID:', err);
+    return null; 
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+async function searchCashiersByName(searchText) { // New function
+  let client;
+  try {
+    client = await pool.connect();
+    const queryText = 'SELECT id, name, join_date, address FROM cashiers WHERE name ILIKE $1;';
+    const queryParams = [`%${searchText}%`];
+    const result = await client.query(queryText, queryParams);
+    return result.rows; // Returns an array of cashier objects
+  } catch (err) {
+    console.error('Error searching cashiers by name:', err);
+    return []; // Return empty array on error
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
 
 module.exports = {
   pool,
@@ -356,12 +442,16 @@ module.exports = {
   updateManufacturer,
   deleteManufacturer,
   searchManufacturers,
-  recordTransaction, // Added new function
-  getTransactionDetails // Added new function
+  recordTransaction, 
+  getTransactionDetails,
+  createCashier,
+  authenticateCashier,
+  getCashierById,
+  searchCashiersByName // Added new function to exports
 };
 
 async function demonstrateCRUD() {
-  let newItem, newItem2, manufacturer1;
+  let newItem, newItem2, manufacturer1, newCashier; 
   try {
     console.log('Attempting to create an item with full details...');
     newItem = await createItem({
@@ -373,41 +463,61 @@ async function demonstrateCRUD() {
     });
     console.log('Created Item (Deluxe Widget):', newItem);
 
-    console.log('\nAttempting to create a second item with minimal details...');
     newItem2 = await createItem({ name: 'Basic Gadget', price: 25.50, quantity: 100, barcode: 'BG987654321' });
     console.log('Created Item (Basic Gadget):', newItem2);
 
+    manufacturer1 = await createManufacturer('Awesome Inc.', '123 Tech Road');
+    console.log('Created Manufacturer:', manufacturer1);
 
-    // Manufacturer setup (remains the same)
+    if (newItem && newItem.id && manufacturer1 && manufacturer1.id) {
+      console.log(`\nAttempting to update Deluxe Widget (ID ${newItem.id}) with manufacturer ID ${manufacturer1.id}...`);
+      newItem = await updateItem(newItem.id, { manufacturerId: manufacturer1.id }); 
+      console.log('Updated Deluxe Widget (with manufacturer linked):', newItem);
+    }
+
+    // --- Cashier Demonstration ---
+    console.log('\n--- Cashier Demonstration ---');
     try {
-      console.log('\nAttempting to create a manufacturer...');
-      manufacturer1 = await createManufacturer('Awesome Inc.', '123 Tech Road');
-      console.log('Created Manufacturer:', manufacturer1);
+      console.log("Attempting to create cashier 'jane.doe' with address...");
+      newCashier = await createCashier('jane.doe', 'superSecurePass456', '456 Oak St, Anytown'); // Added address
+      console.log('Created Cashier:', newCashier);
 
-      if (newItem && newItem.id && manufacturer1 && manufacturer1.id) {
-        console.log(`\nAttempting to update Deluxe Widget (ID ${newItem.id}) with manufacturer ID ${manufacturer1.id}...`);
-        const updatedItemWithManu = await updateItem(newItem.id, { manufacturerId: manufacturer1.id });
-        console.log('Updated Deluxe Widget (with manufacturer linked):', updatedItemWithManu);
-        newItem = updatedItemWithManu;
+      if (newCashier && newCashier.id) {
+        console.log("\nAttempting to authenticate 'jane.doe' with correct password...");
+        const authCashierCorrect = await authenticateCashier('jane.doe', 'superSecurePass456');
+        console.log('Authentication Result (Correct Pass):', authCashierCorrect ? { id: authCashierCorrect.id, name: authCashierCorrect.name, address: authCashierCorrect.address } : null);
+
+        console.log("\nAttempting to authenticate 'jane.doe' with incorrect password...");
+        const authCashierIncorrect = await authenticateCashier('jane.doe', 'wrongPassword');
+        console.log('Authentication Result (Incorrect Pass):', authCashierIncorrect);
+        
+        console.log(`\nAttempting to get cashier by ID: ${newCashier.id}...`);
+        const fetchedCashier = await getCashierById(newCashier.id);
+        console.log('Get Cashier By ID Result:', fetchedCashier ? { id: fetchedCashier.id, name: fetchedCashier.name, address: fetchedCashier.address } : null);
+
+        console.log("\nAttempting to search for cashiers with name containing 'jane'...");
+        const searchResultsCashier = await searchCashiersByName('jane');
+        console.log('Search Cashiers By Name Result:', searchResultsCashier.map(c => ({id: c.id, name: c.name, address: c.address })));
       }
     } catch (e) {
-      console.error("Error in manufacturer creation/linking part of demo:", e);
+      console.error('Error during cashier demonstration:', e.message); 
     }
+    console.log('--- End Cashier Demonstration ---');
     
-    // Item operations (remains largely the same, ensure items exist for transaction)
     if (newItem && newItem.id) {
       console.log(`\nAttempting to read Deluxe Widget (ID: ${newItem.id})...`);
-      await readItem(newItem.id); // Result not stored, just for demo
+      await readItem(newItem.id); 
       console.log(`\nAttempting to update Deluxe Widget (ID: ${newItem.id}) price and quantity...`);
-      newItem = await updateItem(newItem.id, { price: 179.99, quantity: 45 }); // Update and store
+      newItem = await updateItem(newItem.id, { price: 179.99, quantity: 45 }); 
     }
     if (newItem2 && newItem2.id) {
       console.log(`\nAttempting to read Basic Gadget (ID: ${newItem2.id})...`);
-       await readItem(newItem2.id); // Result not stored
+       await readItem(newItem2.id); 
     }
 
-    // Demonstrate Transaction
     let transactionId;
+    const cashierIdForTransaction = newCashier && newCashier.id ? newCashier.id : null; 
+
     if (newItem && newItem.id && newItem2 && newItem2.id) {
       console.log('\n--- Transaction Demonstration ---');
       const itemsToSell = [
@@ -418,7 +528,7 @@ async function demonstrateCRUD() {
 
       try {
         console.log('\nAttempting to record a transaction...');
-        const transactionResult = await recordTransaction(overallTotalPrice, itemsToSell);
+        const transactionResult = await recordTransaction(overallTotalPrice, itemsToSell, cashierIdForTransaction); 
         console.log('Transaction Recorded:', transactionResult);
         transactionId = transactionResult.transactionId;
 
@@ -435,31 +545,25 @@ async function demonstrateCRUD() {
         console.log(`Basic Gadget quantity after sale (should be 99): ${item2AfterSale ? item2AfterSale.quantity : 'N/A'}`);
 
       } catch (e) {
-        console.error('Error during transaction demonstration:', e);
+        console.error('Error during transaction demonstration:', e.message); 
       }
       console.log('--- End Transaction Demonstration ---');
     }
 
-
-    // Clean up (remains largely the same)
-    if (newItem && newItem.id) {
-      console.log(`\nAttempting to delete Deluxe Widget (ID: ${newItem.id})...`);
-      await deleteItem(newItem.id);
-    }
-    if (newItem2 && newItem2.id) {
-      console.log(`\nAttempting to delete Basic Gadget (ID: ${newItem2.id})...`);
-      await deleteItem(newItem2.id);
-    }
-    if (manufacturer1 && manufacturer1.id) {
-      console.log(`\nAttempting to delete manufacturer (ID: ${manufacturer1.id})...`);
-      await deleteManufacturer(manufacturer1.id);
+    // Clean up
+    if (newItem && newItem.id) await deleteItem(newItem.id);
+    if (newItem2 && newItem2.id) await deleteItem(newItem2.id);
+    if (manufacturer1 && manufacturer1.id) await deleteManufacturer(manufacturer1.id);
+    if (newCashier && newCashier.id) { 
+        console.log(`\nAttempting to clean up cashier ID: ${newCashier.id}`);
+        // Placeholder for deleteCashier if it existed
     }
 
   } catch (error) {
-    console.error('Error in overall CRUD demonstration:', error);
+    console.error('Error in overall CRUD demonstration:', error.message); 
   } finally {
     console.log('\nCRUD demonstration finished. Closing connection pool.');
-    await pool.end(); // Ensure pool is closed
+    await pool.end(); 
   }
 }
 

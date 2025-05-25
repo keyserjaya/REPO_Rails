@@ -79,12 +79,49 @@ CREATE INDEX idx_manufacturers_name_gist ON manufacturers USING gist (name gist_
 DROP INDEX IF EXISTS idx_manufacturers_address_gist;
 CREATE INDEX idx_manufacturers_address_gist ON manufacturers USING gist (address gist_trgm_ops);
 
+-- Create cashiers table
+CREATE TABLE IF NOT EXISTS cashiers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL, -- For storing bcrypt hashes
+    join_date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    -- address column will be added via ALTER TABLE below
+);
+
+-- Alter cashiers table to add address column
+ALTER TABLE cashiers
+ADD COLUMN IF NOT EXISTS address TEXT;
+
+-- Set address column to NOT NULL
+-- Note: If the table already has rows with NULL addresses, this command will fail.
+-- For a setup script that might be run on an empty table or where this constraint is newly enforced, it's okay.
+-- A more robust approach for existing data would be to first populate NULL addresses or add a DEFAULT.
+-- Given this is a setup script, we'll proceed with setting NOT NULL.
+ALTER TABLE cashiers
+ALTER COLUMN address SET NOT NULL;
+
 -- Create 'transactions' table if it doesn't already exist.
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
     transaction_date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     overall_total_price DECIMAL(10, 2) NOT NULL
+    -- cashier_id will be added via ALTER TABLE below
 );
+
+-- Alter transactions table to add cashier_id
+ALTER TABLE transactions
+ADD COLUMN IF NOT EXISTS cashier_id INTEGER;
+
+-- Add foreign key constraint for cashier_id
+-- Drop if exists to make script re-runnable (name it e.g., fk_transactions_cashier)
+ALTER TABLE transactions
+DROP CONSTRAINT IF EXISTS fk_transactions_cashier;
+
+ALTER TABLE transactions
+ADD CONSTRAINT fk_transactions_cashier
+    FOREIGN KEY(cashier_id)
+    REFERENCES cashiers(id)
+    ON DELETE SET NULL; -- Or ON DELETE RESTRICT, SET NULL is chosen per plan
 
 -- Create 'transaction_items' table if it doesn't already exist.
 -- This table links items to transactions and stores sale-specific details.
@@ -103,6 +140,10 @@ CREATE INDEX idx_transaction_items_transaction_id ON transaction_items(transacti
 
 DROP INDEX IF EXISTS idx_transaction_items_item_id;
 CREATE INDEX idx_transaction_items_item_id ON transaction_items(item_id);
+
+-- Add index on transactions.cashier_id
+DROP INDEX IF EXISTS idx_transactions_cashier_id;
+CREATE INDEX idx_transactions_cashier_id ON transactions(cashier_id);
 
 -- Optional: You might want to add some initial sample data for testing.
 -- Example:
