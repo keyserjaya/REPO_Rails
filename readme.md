@@ -45,12 +45,29 @@ Before you begin, ensure you have the following installed:
                 ON DELETE SET NULL
         );
         ```
-    *   Creates the `items` table with a foreign key to `manufacturers` (details as before).
+    *   Creates the `items` table with a foreign key to `manufacturers` and new inventory fields:
+        ```sql
+        CREATE TABLE IF NOT EXISTS items (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            manufacturerId INTEGER,
+            barcode VARCHAR(255), -- New
+            price DECIMAL(10, 2) NOT NULL DEFAULT 0.00, -- New
+            quantity INTEGER NOT NULL DEFAULT 0, -- New
+            CONSTRAINT fk_manufacturer
+                FOREIGN KEY(manufacturerId)
+                REFERENCES manufacturers(id)
+                ON DELETE SET NULL,
+            CONSTRAINT uq_items_barcode UNIQUE (barcode) -- New
+        );
+        ```
     *   Creates GiST indexes for text search:
         *   `idx_items_name_gist` on `items.name`.
         *   `idx_manufacturers_name_gist` on `manufacturers.name`.
         *   `idx_manufacturers_address_gist` on `manufacturers.address`.
-    *   Creates a standard index (`idx_items_manufacturer_id`) on `items.manufacturerId` for faster joins and lookups.
+    *   Creates standard indexes for faster joins and lookups:
+        *   `idx_items_manufacturer_id` on `items.manufacturerId`.
+        *   `idx_items_barcode` on `items.barcode`. -- New
 
    Execute the script using a tool like `psql`:
    ```bash
@@ -97,10 +114,26 @@ node app.js
 ```
 
 **Expected Output:**
-The script will run the `demonstrateCRUD` function. The output will show the creation of items and manufacturers, linking them, updating them, searching for both items and manufacturers, and finally, cleaning them up. Key parts of the output will resemble:
+The script will run the `demonstrateCRUD` function. The output will showcase creation of items (including new fields like barcode, price, quantity), manufacturers, linking them, updating item details, searching (by name and barcode), and finally, cleaning up. Key parts of the output will resemble:
 ```
-Attempting to create an item (no manufacturer initially)...
-Created Item (no manufacturer): { id: 1, name: 'Original Item', manufacturerid: null }
+Attempting to create an item with full details...
+Created Item (Deluxe Widget): {
+  id: 1,
+  name: 'Deluxe Widget',
+  manufacturerid: null,
+  barcode: 'DW123456789',
+  price: '199.99',
+  quantity: 50
+}
+Attempting to create a second item with minimal details...
+Created Item (Basic Gadget - defaults): {
+  id: 2,
+  name: 'Basic Gadget',
+  manufacturerid: null,
+  barcode: null,
+  price: '0.00',
+  quantity: 0
+}
 
 Attempting to create a manufacturer...
 Created Manufacturer: { id: 1, name: 'Awesome Inc.', address: '123 Tech Road' }
@@ -123,19 +156,36 @@ Updated Item Name: { id: 1, name: 'Super Original Item', manufacturerid: 1 }
 Attempting to update item ID 1 to set manufacturerId to NULL...
 Updated Item (manufacturer unlinked): { id: 1, name: 'Super Original Item', manufacturerid: null }
 
-Attempting to search for items with name containing 'Super'...
-Search Results (should include item, no manu details): [
+Attempting to get item by barcode: DW123456789...
+Get Item By Barcode Result: {
+  id: 1,
+  name: 'Deluxe Widget',
+  manufacturerid: 1,
+  barcode: 'DW123456789',
+  price: '179.99',
+  quantity: 45,
+  manufacturer_name: 'Awesome Inc.',
+  manufacturer_address: '123 Tech Road'
+}
+
+Attempting to search for items with name containing 'Widget'...
+Search Results (should include Deluxe Widget): [
   {
     id: 1,
-    name: 'Super Original Item',
-    manufacturerid: null,
-    manufacturer_name: null,
-    manufacturer_address: null
+    name: 'Deluxe Widget',
+    manufacturerid: 1,
+    barcode: 'DW123456789',
+    price: '179.99',
+    quantity: 45,
+    manufacturer_name: 'Awesome Inc.',
+    manufacturer_address: '123 Tech Road'
   }
 ]
 
-Attempting to delete item with ID: 1...
-Item Deletion Result: true
+Attempting to delete Deluxe Widget (ID: 1)...
+Deluxe Widget (ID: 1) deleted.
+Attempting to delete Basic Gadget (ID: 2)...
+Basic Gadget (ID: 2) deleted.
 
 Attempting to delete manufacturer with ID: 1...
 Manufacturer Deletion Result: true
@@ -157,11 +207,17 @@ The `id` values and exact formatting might differ slightly based on your databas
 ## Available Functions (in `app.js`)
 
 ### Item Functions
-*   `createItem(name, manufacturerId)`: Creates a new item. `manufacturerId` is optional and can be `null`.
-*   `readItem(id)`: Retrieves an item by its `id`. Now includes joined manufacturer details (`manufacturer_name`, `manufacturer_address`) if a manufacturer is linked.
-*   `updateItem(id, updates)`: Updates an item. The `updates` object can contain `{ name, manufacturerId }`. `manufacturerId` can be set to a new ID or `null` to unlink.
+*   `createItem(details)`: Creates a new item. The `details` object can contain:
+    *   `name` (String, required): Name of the item.
+    *   `manufacturerId` (Integer, optional, default: `null`): ID of the linked manufacturer.
+    *   `barcode` (String, optional, default: `null`): Unique barcode for the item.
+    *   `price` (Number, optional, default: `0.00`): Price of the item.
+    *   `quantity` (Integer, optional, default: `0`): Quantity in stock.
+*   `readItem(id)`: Retrieves an item by its `id`. Includes joined manufacturer details and new fields (`barcode`, `price`, `quantity`).
+*   `updateItem(id, updates)`: Updates an item. The `updates` object can contain `{ name, manufacturerId, barcode, price, quantity }`. `manufacturerId` can be set to a new ID or `null`.
 *   `deleteItem(id)`: Deletes an item by its `id`.
-*   `searchItemsByName(searchText)`: Performs a case-insensitive, partial search on item names. Results now include joined manufacturer details.
+*   `searchItemsByName(searchText)`: Performs a case-insensitive, partial search on item names. Results include joined manufacturer details and new fields (`barcode`, `price`, `quantity`).
+*   `getItemByBarcode(barcode)`: Retrieves an item (including manufacturer details and new fields) by its unique `barcode`. Returns `null` if not found or on error.
 
 ### Manufacturer Functions
 *   `createManufacturer(name, address)`: Creates a new manufacturer.

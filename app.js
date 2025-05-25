@@ -8,13 +8,17 @@ const pool = new Pool({
   port: 5432,            // Placeholder
 });
 
-async function createItem(name, manufacturerId = null) { // Added manufacturerId, defaults to null
+async function createItem(details) { // Signature changed to accept a details object
   let client;
   try {
+    const { name, manufacturerId = null, barcode = null, price = 0.00, quantity = 0 } = details;
+    // Validate required fields like name
+    if (!name) {
+      throw new Error('Item name is required.');
+    }
     client = await pool.connect();
-    // Use manufacturerId in the query, allowing it to be null
-    const queryText = 'INSERT INTO items (name, manufacturerId) VALUES ($1, $2) RETURNING *';
-    const result = await client.query(queryText, [name, manufacturerId]);
+    const queryText = 'INSERT INTO items (name, manufacturerId, barcode, price, quantity) VALUES ($1, $2, $3, $4, $5) RETURNING *;';
+    const result = await client.query(queryText, [name, manufacturerId, barcode, price, quantity]);
     return result.rows[0];
   } catch (err) {
     console.error('Error creating item:', err);
@@ -82,17 +86,22 @@ async function updateItem(id, updates) { // Changed signature to (id, updates)
       values.push(updates.name);
     }
     // Allow manufacturerId to be explicitly set to null or a new value
-    if (updates.manufacturerId !== undefined) {
+    if (updates.hasOwnProperty('manufacturerId')) { // Check property existence for null
       fields.push(`manufacturerId = $${paramCount++}`);
       values.push(updates.manufacturerId);
-    } else if (updates.hasOwnProperty('manufacturerId') && updates.manufacturerId === null) {
-      // Handle explicit null for manufacturerId if it's the only property
-      // This case is mostly covered by `updates.manufacturerId !== undefined` when null is passed
-      // but being explicit if only `manufacturerId: null` is passed.
-       fields.push(`manufacturerId = $${paramCount++}`);
-       values.push(null);
     }
-
+    if (updates.barcode !== undefined) {
+      fields.push(`barcode = $${paramCount++}`);
+      values.push(updates.barcode);
+    }
+    if (updates.price !== undefined) {
+      fields.push(`price = $${paramCount++}`);
+      values.push(updates.price);
+    }
+    if (updates.quantity !== undefined) {
+      fields.push(`quantity = $${paramCount++}`);
+      values.push(updates.quantity);
+    }
 
     if (fields.length === 0) {
       // No fields to update, perhaps return current item data or null if not found
@@ -109,6 +118,31 @@ async function updateItem(id, updates) { // Changed signature to (id, updates)
   } catch (err) {
     console.error('Error updating item:', err);
     throw err; // Re-throw error as per original CUD pattern for items
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+async function getItemByBarcode(barcode) {
+  let client;
+  try {
+    client = await pool.connect();
+    const queryText = `
+      SELECT
+        items.*,
+        m.name AS manufacturer_name,
+        m.address AS manufacturer_address
+      FROM items
+      LEFT JOIN manufacturers m ON items.manufacturerId = m.id
+      WHERE items.barcode = $1;
+    `;
+    const result = await client.query(queryText, [barcode]);
+    return result.rows.length > 0 ? result.rows[0] : null;
+  } catch (err) {
+    console.error('Error getting item by barcode:', err);
+    return null; // Return null on error
   } finally {
     if (client) {
       client.release();
@@ -255,20 +289,31 @@ module.exports = {
   updateItem,
   deleteItem,
   searchItemsByName,
+  getItemByBarcode, // Added new function
   createManufacturer,
   readManufacturer,
   updateManufacturer,
   deleteManufacturer,
-  searchManufacturers // Added new function
+  searchManufacturers
 };
 
 async function demonstrateCRUD() {
-  let newItem;
+  let newItem, newItem2;
   try {
-    console.log('Attempting to create an item (no manufacturer initially)...');
-    // Pass name and undefined/null for manufacturerId for createItem
-    newItem = await createItem('Original Item', null); 
-    console.log('Created Item (no manufacturer):', newItem);
+    console.log('Attempting to create an item with full details...');
+    newItem = await createItem({
+      name: 'Deluxe Widget',
+      manufacturerId: null, // Will link later
+      barcode: 'DW123456789',
+      price: 199.99,
+      quantity: 50
+    });
+    console.log('Created Item (Deluxe Widget):', newItem);
+
+    console.log('\nAttempting to create a second item with minimal details...');
+    newItem2 = await createItem({ name: 'Basic Gadget' }); // Defaults for other fields
+    console.log('Created Item (Basic Gadget - defaults):', newItem2);
+
 
     let manufacturer1;
     try {
@@ -277,11 +322,9 @@ async function demonstrateCRUD() {
       console.log('Created Manufacturer:', manufacturer1);
 
       if (newItem && newItem.id && manufacturer1 && manufacturer1.id) {
-        console.log(`\nAttempting to update item ID ${newItem.id} with manufacturer ID ${manufacturer1.id}...`);
-        // Update item to link to manufacturer
+        console.log(`\nAttempting to update Deluxe Widget (ID ${newItem.id}) with manufacturer ID ${manufacturer1.id}...`);
         const updatedItemWithManu = await updateItem(newItem.id, { manufacturerId: manufacturer1.id });
-        console.log('Updated Item (with manufacturer linked):', updatedItemWithManu);
-        // Store this version for further operations
+        console.log('Updated Deluxe Widget (with manufacturer linked):', updatedItemWithManu);
         newItem = updatedItemWithManu; 
       }
     } catch (e) {
@@ -290,35 +333,45 @@ async function demonstrateCRUD() {
 
 
     if (newItem && newItem.id) {
-      console.log(`\nAttempting to read item with ID: ${newItem.id} (should have manufacturer details)...`);
+      console.log(`\nAttempting to read Deluxe Widget (ID: ${newItem.id})...`);
       const readResult = await readItem(newItem.id);
-      console.log('Read Item (with manufacturer details):', readResult);
+      console.log('Read Deluxe Widget (with details):', readResult);
 
-      console.log(`\nAttempting to update item name for ID: ${newItem.id}...`);
-      const updatedItemName = await updateItem(newItem.id, { name: 'Super Original Item' });
-      console.log('Updated Item Name:', updatedItemName);
-      newItem = updatedItemName; // Store this version
+      console.log(`\nAttempting to update Deluxe Widget (ID: ${newItem.id}) price and quantity...`);
+      const updatedDetails = await updateItem(newItem.id, { price: 179.99, quantity: 45 });
+      console.log('Updated Deluxe Widget (price/quantity):', updatedDetails);
+      newItem = updatedDetails;
 
-      if (manufacturer1 && manufacturer1.id) {
-        console.log(`\nAttempting to update item ID ${newItem.id} to set manufacturerId to NULL...`);
-        const updatedItemNoManu = await updateItem(newItem.id, { manufacturerId: null });
-        console.log('Updated Item (manufacturer unlinked):', updatedItemNoManu);
-        newItem = updatedItemNoManu; // Store this version
+      if (newItem.barcode) {
+        console.log(`\nAttempting to get item by barcode: ${newItem.barcode}...`);
+        const itemByBarcode = await getItemByBarcode(newItem.barcode);
+        console.log('Get Item By Barcode Result:', itemByBarcode);
       }
+    }
+    
+    if (newItem2 && newItem2.id) {
+        console.log(`\nAttempting to read Basic Gadget (ID: ${newItem2.id})...`);
+        const readGadget = await readItem(newItem2.id);
+        console.log('Read Basic Gadget (defaults):', readGadget);
+    }
+
 
       // Demonstrate search (item name should be 'Super Original Item' and have no manu details now)
-      console.log(`\nAttempting to search for items with name containing 'Super'...`);
-      const searchResults = await searchItemsByName('Super');
-      console.log('Search Results (should include item, no manu details):', searchResults);
-
-      console.log(`\nAttempting to search for items with name containing 'XYZ'...`);
-      const searchResultsXYZ = await searchItemsByName('XYZ');
-      console.log('Search Results XYZ (should be empty):', searchResultsXYZ);
+      console.log(`\nAttempting to search for items with name containing 'Widget'...`);
+      const searchResults = await searchItemsByName('Widget');
+      console.log('Search Results (should include Deluxe Widget):', searchResults);
       
-      // Clean up: delete the item
-      console.log(`\nAttempting to delete item with ID: ${newItem.id}...`);
-      const deleteResult = await deleteItem(newItem.id);
-      console.log('Item Deletion Result:', deleteResult);
+      // Clean up
+      if (newItem && newItem.id) {
+        console.log(`\nAttempting to delete Deluxe Widget (ID: ${newItem.id})...`);
+        await deleteItem(newItem.id);
+        console.log(`Deluxe Widget (ID: ${newItem.id}) deleted.`);
+      }
+      if (newItem2 && newItem2.id) {
+        console.log(`\nAttempting to delete Basic Gadget (ID: ${newItem2.id})...`);
+        await deleteItem(newItem2.id);
+        console.log(`Basic Gadget (ID: ${newItem2.id}) deleted.`);
+      }
 
 
       // Demonstrate searching manufacturers
@@ -326,26 +379,14 @@ async function demonstrateCRUD() {
         console.log(`\nAttempting to search for manufacturer with text 'Awesome'...`);
         const searchManuResults = await searchManufacturers('Awesome');
         console.log('Search Manufacturer Results (should find Awesome Inc.):', searchManuResults);
-
-        console.log(`\nAttempting to search for manufacturer with text 'Road'...`);
-        const searchManuResultsAddr = await searchManufacturers('Road');
-        console.log('Search Manufacturer Results by Address (should find Awesome Inc.):', searchManuResultsAddr);
         
-        console.log(`\nAttempting to search for manufacturer with text 'NonExistent'...`);
-        const searchManuResultsNonExistent = await searchManufacturers('NonExistent');
-        console.log('Search Manufacturer Results (should be empty):', searchManuResultsNonExistent);
-
         // Clean up: delete the manufacturer
         console.log(`\nAttempting to delete manufacturer with ID: ${manufacturer1.id}...`);
         const deleteManuResult = await deleteManufacturer(manufacturer1.id);
         console.log('Manufacturer Deletion Result:', deleteManuResult);
       }
 
-      console.log(`\nAttempting to read deleted item with ID: ${newItem.id}...`);
-      const readAfterDeleteResult = await readItem(newItem.id);
-      console.log('Read After Delete Item:', readAfterDeleteResult);
-    }
-  } catch (error) {
+    } catch (error) {
     console.error('Error in CRUD demonstration:', error);
   } finally {
     console.log('\nCRUD demonstration finished. Closing connection pool.');

@@ -22,6 +22,18 @@ CREATE TABLE IF NOT EXISTS items (
 ALTER TABLE items
 ADD COLUMN IF NOT EXISTS manufacturerId INTEGER;
 
+-- Add barcode column to items table if it doesn't exist.
+ALTER TABLE items
+ADD COLUMN IF NOT EXISTS barcode VARCHAR(255);
+
+-- Add price column to items table if it doesn't exist.
+ALTER TABLE items
+ADD COLUMN IF NOT EXISTS price DECIMAL(10, 2) NOT NULL DEFAULT 0.00;
+
+-- Add quantity column to items table if it doesn't exist.
+ALTER TABLE items
+ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 0;
+
 -- Drop existing foreign key constraint if it exists, to avoid error if re-running.
 -- This is important for script re-runnability.
 ALTER TABLE items
@@ -36,6 +48,13 @@ ADD CONSTRAINT fk_manufacturer
     REFERENCES manufacturers(id)
     ON DELETE SET NULL;
 
+-- Add UNIQUE constraint to barcode column in items table.
+-- Drop existing constraint if it exists, to avoid error if re-running.
+ALTER TABLE items
+DROP CONSTRAINT IF EXISTS uq_items_barcode;
+ALTER TABLE items
+ADD CONSTRAINT uq_items_barcode UNIQUE (barcode);
+
 -- Create a GiST index on the 'name' column of the 'items' table using gist_trgm_ops.
 -- This index will speed up similarity searches (e.g., using ILIKE or similarity() function).
 DROP INDEX IF EXISTS idx_items_name_gist;
@@ -45,6 +64,10 @@ CREATE INDEX idx_items_name_gist ON items USING gist (name gist_trgm_ops);
 -- This will speed up queries that involve joining items with manufacturers or filtering by manufacturerId.
 DROP INDEX IF EXISTS idx_items_manufacturer_id;
 CREATE INDEX idx_items_manufacturer_id ON items(manufacturerId);
+
+-- Create an index on the 'barcode' column of the 'items' table.
+DROP INDEX IF EXISTS idx_items_barcode;
+CREATE INDEX idx_items_barcode ON items(barcode);
 
 -- Create a GiST index on the 'name' column of the 'manufacturers' table.
 -- This will speed up similarity searches on manufacturer names.
