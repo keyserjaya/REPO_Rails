@@ -1,0 +1,75 @@
+/* frontend/styles/globals.css */
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen,
+    Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
+  background-color: #2d2d2d; /* Dark background */
+  color: #f0f0f0; /* Light text */
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Basic styling for the login page form elements to ensure visibility on dark theme */
+/* This assumes the inline styles from frontend/pages/index.js might be removed or overridden later */
+
+/* Style for labels on the login page if needed, though inline styles are currently used */
+/* label {
+  display: block;
+  margin-bottom: 0.5rem;
+} */
+
+/* Style for input fields to be more visible on dark theme */
+input[type="text"],
+input[type="password"] {
+  background-color: #444; /* Slightly lighter dark for input background */
+  color: #f0f0f0; /* Light text for input */
+  border: 1px solid #666; /* Border for inputs */
+  padding: 0.75rem; /* Consistent padding with button if possible */
+  border-radius: 4px; /* Consistent border-radius */
+  width: 100%; /* Ensure it takes full width of its container */
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus {
+  outline: none;
+  border-color: #0070f3; /* Highlight focus with a theme color */
+  box-shadow: 0 0 0 2px rgba(0, 112, 243, 0.2); /* Subtle glow on focus */
+}
+
+/* Style for buttons to be more visible on dark theme */
+/* button[type="submit"] {
+  background-color: #0070f3; /* Example button color */
+  /* color: white; */
+  /* padding: 0.75rem; */
+  /* border: none; */
+  /* border-radius: 4px; */
+  /* cursor: pointer; */
+  /* font-size: 1rem; */
+/* } */
+
+/* button[type="submit"]:hover { */
+  /* background-color: #005bb5; */ /* Darker shade on hover */
+/* } */
+
+/*
+  Note: The inline styles in `frontend/pages/index.js` for the form
+  (width, padding, specific border, background for button) will take precedence
+  for those specific properties. These global styles provide a fallback or base
+  if inline styles are removed or for other inputs/buttons that might be added later.
+  The current inline styles for inputs in index.js are:
+  `style={{ width: '100%', padding: '0.5rem', border: '1px solid #ccc', borderRadius: '4px' }}`
+  The globals.css here uses a different padding and border for inputs to better suit the dark theme.
+  It would be best to make these consistent, e.g., by removing the specific border/padding from inline
+  styles and letting globals.css handle it, or adjusting globals.css to match if the inline ones are preferred.
+  For now, this will set a base that can be refined.
+*/

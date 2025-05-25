@@ -1,7 +1,16 @@
 # Environment variables
 # Do not commit this file to version control as it contains sensitive credentials.
-.env
+backend/.env
 
 # Dependencies
 # Installed dependencies, typically can be regenerated from package-lock.json
-node_modules/
+backend/node_modules/
+
+# Frontend Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
