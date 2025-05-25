@@ -1,0 +1,16 @@
+{
+  "name": "nodejs-postgres-crud",
+  "version": "1.0.0",
+  "description": "A simple PostgreSQL CRUD template with connection pooling in Node.js",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["nodejs", "postgres", "crud", "pool"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "pg": "^8.7.1"
+  }
+}
