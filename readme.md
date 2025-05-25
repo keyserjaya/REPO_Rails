@@ -61,13 +61,29 @@ Before you begin, ensure you have the following installed:
             CONSTRAINT uq_items_barcode UNIQUE (barcode) -- New
         );
         ```
-    *   Creates GiST indexes for text search:
-        *   `idx_items_name_gist` on `items.name`.
-        *   `idx_manufacturers_name_gist` on `manufacturers.name`.
-        *   `idx_manufacturers_address_gist` on `manufacturers.address`.
-    *   Creates standard indexes for faster joins and lookups:
-        *   `idx_items_manufacturer_id` on `items.manufacturerId`.
-        *   `idx_items_barcode` on `items.barcode`. -- New
+    *   Creates GiST indexes for text search on `items.name`, `manufacturers.name`, and `manufacturers.address`.
+    *   Creates standard indexes for faster joins and lookups on `items.manufacturerId` and `items.barcode`.
+    *   Creates the `transactions` table:
+        ```sql
+        CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY,
+            transaction_date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            overall_total_price DECIMAL(10, 2) NOT NULL
+        );
+        ```
+    *   Creates the `transaction_items` table, linking items to transactions:
+        ```sql
+        CREATE TABLE IF NOT EXISTS transaction_items (
+            id SERIAL PRIMARY KEY,
+            transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+            item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
+            quantity_sold INTEGER NOT NULL,
+            price_per_unit_at_sale DECIMAL(10, 2) NOT NULL,
+            line_item_total_price DECIMAL(10, 2) NOT NULL
+        );
+        ```
+    *   Creates indexes on `transaction_items` for `transaction_id` and `item_id` to improve query performance.
+
 
    Execute the script using a tool like `psql`:
    ```bash
@@ -75,19 +91,24 @@ Before you begin, ensure you have the following installed:
    ```
    Replace `your_username` and `your_database_name` with your actual PostgreSQL username and database name. The script uses `IF NOT EXISTS` and `ADD COLUMN IF NOT EXISTS` where appropriate, making it re-runnable.
 
-**d. Update Connection Details in `app.js`:**
-   Open the `app.js` file in the project. You will find placeholder values for the PostgreSQL connection:
-   ```javascript
-   const pool = new Pool({
-     user: 'your_username', // Placeholder
-     host: 'your_host',     // Placeholder
-     database: 'your_database', // Placeholder - Replace with your_database_name
-     password: 'your_password', // Placeholder
-     port: 5432,            // Placeholder - Default PostgreSQL port
-   });
-   ```
-   Modify these placeholders (`your_username`, `your_host`, `your_database`, `your_password`, and `port` if necessary) to match your PostgreSQL server configuration and the database you created.
-   **Note:** For production environments, it's highly recommended to use environment variables for sensitive information like database credentials. However, for this template, you'll directly edit these placeholders.
+**d. Configure Environment Variables:**
+   Database connection details are managed through environment variables. This project uses the `dotenv` package to load these variables from a `.env` file at runtime.
+
+   1.  **Create a `.env` file:**
+       Copy the sample environment file to a new file named `.env`:
+       ```bash
+       cp .env.sample .env
+       ```
+   2.  **Edit `.env`:**
+       Open the newly created `.env` file and update the placeholder values with your actual PostgreSQL server configuration:
+       ```dotenv
+       DB_USER=your_postgres_user
+       DB_HOST=localhost
+       DB_NAME=your_database_name
+       DB_PASS=your_postgres_password
+       DB_PORT=5432
+       ```
+       Replace `your_postgres_user`, `localhost`, `your_database_name`, `your_postgres_password`, and `5432` (if your port is different) with your specific details.
 
 ### 2. Install Dependencies
 
@@ -100,13 +121,14 @@ Before you begin, ensure you have the following installed:
    Otherwise, download the project files (`app.js`, `package.json`) and navigate to the project directory in your terminal.
 
 **b. Install npm Packages:**
-   In the project directory, run the following command to install the necessary dependencies (primarily the `pg` module) listed in `package.json`:
+   In the project directory, run the following command to install the necessary dependencies (including `pg` for PostgreSQL and `dotenv` for environment variable management) listed in `package.json`:
    ```bash
    npm install
    ```
+   This command reads the `package.json` file and installs all listed production dependencies.
 
 ## Running the Application
-Once the setup is complete, you can run the application. The `demonstrateCRUD` function in `app.js` will showcase various operations, including interactions between items and manufacturers.
+Once the setup and configuration (including your `.env` file) are complete, you can run the application. The `demonstrateCRUD` function in `app.js` will showcase various operations, including interactions between items and manufacturers.
 
 Execute the following command in your terminal from the project root directory:
 ```bash
@@ -114,26 +136,12 @@ node app.js
 ```
 
 **Expected Output:**
-The script will run the `demonstrateCRUD` function. The output will showcase creation of items (including new fields like barcode, price, quantity), manufacturers, linking them, updating item details, searching (by name and barcode), and finally, cleaning up. Key parts of the output will resemble:
+The script will run the `demonstrateCRUD` function. The output will showcase creation of items and manufacturers, linking them, updating details, performing searches, recording sales transactions (which updates item stock), fetching transaction details, and finally, cleaning up. Key parts of the output will resemble:
 ```
 Attempting to create an item with full details...
-Created Item (Deluxe Widget): {
-  id: 1,
-  name: 'Deluxe Widget',
-  manufacturerid: null,
-  barcode: 'DW123456789',
-  price: '199.99',
-  quantity: 50
-}
+Created Item (Deluxe Widget): { id: 1, ..., quantity: 50 }
 Attempting to create a second item with minimal details...
-Created Item (Basic Gadget - defaults): {
-  id: 2,
-  name: 'Basic Gadget',
-  manufacturerid: null,
-  barcode: null,
-  price: '0.00',
-  quantity: 0
-}
+Created Item (Basic Gadget): { id: 2, ..., quantity: 100 }
 
 Attempting to create a manufacturer...
 Created Manufacturer: { id: 1, name: 'Awesome Inc.', address: '123 Tech Road' }
@@ -157,35 +165,26 @@ Attempting to update item ID 1 to set manufacturerId to NULL...
 Updated Item (manufacturer unlinked): { id: 1, name: 'Super Original Item', manufacturerid: null }
 
 Attempting to get item by barcode: DW123456789...
-Get Item By Barcode Result: {
-  id: 1,
-  name: 'Deluxe Widget',
-  manufacturerid: 1,
-  barcode: 'DW123456789',
-  price: '179.99',
-  quantity: 45,
-  manufacturer_name: 'Awesome Inc.',
-  manufacturer_address: '123 Tech Road'
-}
+Get Item By Barcode Result: { id: 1, ..., quantity: 45, ...}
 
-Attempting to search for items with name containing 'Widget'...
-Search Results (should include Deluxe Widget): [
-  {
-    id: 1,
-    name: 'Deluxe Widget',
-    manufacturerid: 1,
-    barcode: 'DW123456789',
-    price: '179.99',
-    quantity: 45,
-    manufacturer_name: 'Awesome Inc.',
-    manufacturer_address: '123 Tech Road'
-  }
-]
+--- Transaction Demonstration ---
+Attempting to record a transaction...
+Transaction Recorded: { transactionId: 1, ..., items_sold_count: 2 }
+Attempting to get transaction details for ID: 1...
+Transaction Details: {
+  "transaction": { "id": 1, "transaction_date": "...", "overall_total_price": "..." },
+  "items": [
+    { "id": 1, "transaction_id": 1, "item_id": 1, "quantity_sold": 2, ..., "item_name": "Deluxe Widget", ... },
+    { "id": 2, "transaction_id": 1, "item_id": 2, "quantity_sold": 1, ..., "item_name": "Basic Gadget", ... }
+  ]
+}
+Verifying item quantities after transaction...
+Deluxe Widget quantity after sale (should be 43): 43
+Basic Gadget quantity after sale (should be 99): 99
+--- End Transaction Demonstration ---
 
 Attempting to delete Deluxe Widget (ID: 1)...
-Deluxe Widget (ID: 1) deleted.
 Attempting to delete Basic Gadget (ID: 2)...
-Basic Gadget (ID: 2) deleted.
 
 Attempting to delete manufacturer with ID: 1...
 Manufacturer Deletion Result: true
@@ -225,3 +224,33 @@ The `id` values and exact formatting might differ slightly based on your databas
 *   `updateManufacturer(id, newName, newAddress)`: Updates a manufacturer's details. Supports partial updates (e.g., you can provide only `newName` or only `newAddress`).
 *   `deleteManufacturer(id)`: Deletes a manufacturer by its `id`. Items previously linked to this manufacturer will have their `manufacturerId` set to `NULL` due to the `ON DELETE SET NULL` constraint.
 *   `searchManufacturers(searchText)`: Searches for manufacturers where the `name` OR `address` field matches the `searchText` using a case-insensitive, partial match. This search benefits from the GiST indexes on `manufacturers.name` and `manufacturers.address`.
+
+### Transaction Functions
+*   `recordTransaction(overall_total_price, items_sold)`:
+    *   Purpose: Records a sales transaction, including all items sold, their prices at the time of sale, and updates the stock quantity for each sold item in the `items` table.
+    *   `overall_total_price` (Number): The total price for the entire transaction.
+    *   `items_sold` (Array): An array of objects, where each object represents an item sold and must have the following structure:
+        ```javascript
+        {
+          itemId: Integer, // ID of the item from the 'items' table
+          quantitySold: Integer, // How many units of this item were sold
+          pricePerUnitAtSale: Number, // The price of one unit of this item at the time of sale
+          lineItemTotalPrice: Number // Total price for this line (quantitySold * pricePerUnitAtSale)
+        }
+        ```
+    *   Database Transaction: This function uses a database transaction to ensure that all operations (inserting into `transactions`, `transaction_items`, and updating `items` stock) are completed successfully or rolled back if any error occurs.
+    *   Stock Management: The `quantity` of each item in the `items` table is decremented by `quantitySold`.
+*   `getTransactionDetails(transactionId)`:
+    *   Purpose: Retrieves a specific transaction along with all its line items.
+    *   `transactionId` (Integer): The ID of the transaction to retrieve.
+    *   Return Value: An object containing the main transaction record and an array of its items. Item details include `item_name` and `item_barcode` by joining with the `items` table. Example structure:
+        ```javascript
+        {
+          transaction: { id: 1, transaction_date: "...", overall_total_price: "123.45", ... },
+          items: [
+            { id: 1, transaction_id: 1, item_id: 101, quantity_sold: 2, ..., item_name: "Widget A", item_barcode: "BC123" },
+            { id: 2, transaction_id: 1, item_id: 102, quantity_sold: 1, ..., item_name: "Gadget B", item_barcode: "BC456" }
+          ]
+        }
+        ```
+        Returns `null` if the transaction is not found or an error occurs.

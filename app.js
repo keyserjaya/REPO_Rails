@@ -1,11 +1,12 @@
+require('dotenv').config(); // Added for environment variable configuration
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  user: 'your_username', // Placeholder
-  host: 'your_host',     // Placeholder
-  database: 'your_database', // Placeholder
-  password: 'your_password', // Placeholder
-  port: 5432,            // Placeholder
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASS,
+  port: parseInt(process.env.DB_PORT || '5432', 10),
 });
 
 async function createItem(details) { // Signature changed to accept a details object
@@ -282,6 +283,66 @@ async function deleteManufacturer(id) {
   }
 }
 
+// Transaction Functions
+
+async function recordTransaction(overall_total_price, items_sold) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const transactionQuery = 'INSERT INTO transactions (overall_total_price) VALUES ($1) RETURNING id, transaction_date;';
+    const transactionResult = await client.query(transactionQuery, [overall_total_price]);
+    const transactionId = transactionResult.rows[0].id;
+    const transactionDate = transactionResult.rows[0].transaction_date;
+
+    for (const itemSold of items_sold) {
+      const transItemQuery = 'INSERT INTO transaction_items (transaction_id, item_id, quantity_sold, price_per_unit_at_sale, line_item_total_price) VALUES ($1, $2, $3, $4, $5);';
+      await client.query(transItemQuery, [transactionId, itemSold.itemId, itemSold.quantitySold, itemSold.pricePerUnitAtSale, itemSold.lineItemTotalPrice]);
+
+      const updateItemQtyQuery = 'UPDATE items SET quantity = quantity - $1 WHERE id = $2;';
+      await client.query(updateItemQtyQuery, [itemSold.quantitySold, itemSold.itemId]);
+    }
+
+    await client.query('COMMIT');
+    return { transactionId, transactionDate, overall_total_price, items_sold_count: items_sold.length };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error recording transaction:', err);
+    throw err; // Re-throw the error
+  } finally {
+    client.release();
+  }
+}
+
+async function getTransactionDetails(transactionId) {
+  const client = await pool.connect();
+  try {
+    const transactionQuery = 'SELECT * FROM transactions WHERE id = $1;';
+    const transactionResult = await client.query(transactionQuery, [transactionId]);
+    if (transactionResult.rows.length === 0) {
+      return null; // Transaction not found
+    }
+    const transactionData = transactionResult.rows[0];
+
+    const itemsQuery = `
+      SELECT ti.*, i.name as item_name, i.barcode as item_barcode
+      FROM transaction_items ti
+      JOIN items i ON ti.item_id = i.id
+      WHERE ti.transaction_id = $1
+      ORDER BY ti.id;`;
+    const itemsResult = await client.query(itemsQuery, [transactionId]);
+    const itemsData = itemsResult.rows;
+
+    return { transaction: transactionData, items: itemsData };
+  } catch (err) {
+    console.error('Error getting transaction details:', err);
+    return null; // Return null on error
+  } finally {
+    client.release();
+  }
+}
+
+
 module.exports = {
   pool,
   createItem,
@@ -289,21 +350,23 @@ module.exports = {
   updateItem,
   deleteItem,
   searchItemsByName,
-  getItemByBarcode, // Added new function
+  getItemByBarcode,
   createManufacturer,
   readManufacturer,
   updateManufacturer,
   deleteManufacturer,
-  searchManufacturers
+  searchManufacturers,
+  recordTransaction, // Added new function
+  getTransactionDetails // Added new function
 };
 
 async function demonstrateCRUD() {
-  let newItem, newItem2;
+  let newItem, newItem2, manufacturer1;
   try {
     console.log('Attempting to create an item with full details...');
     newItem = await createItem({
       name: 'Deluxe Widget',
-      manufacturerId: null, // Will link later
+      manufacturerId: null,
       barcode: 'DW123456789',
       price: 199.99,
       quantity: 50
@@ -311,11 +374,11 @@ async function demonstrateCRUD() {
     console.log('Created Item (Deluxe Widget):', newItem);
 
     console.log('\nAttempting to create a second item with minimal details...');
-    newItem2 = await createItem({ name: 'Basic Gadget' }); // Defaults for other fields
-    console.log('Created Item (Basic Gadget - defaults):', newItem2);
+    newItem2 = await createItem({ name: 'Basic Gadget', price: 25.50, quantity: 100, barcode: 'BG987654321' });
+    console.log('Created Item (Basic Gadget):', newItem2);
 
 
-    let manufacturer1;
+    // Manufacturer setup (remains the same)
     try {
       console.log('\nAttempting to create a manufacturer...');
       manufacturer1 = await createManufacturer('Awesome Inc.', '123 Tech Road');
@@ -325,69 +388,75 @@ async function demonstrateCRUD() {
         console.log(`\nAttempting to update Deluxe Widget (ID ${newItem.id}) with manufacturer ID ${manufacturer1.id}...`);
         const updatedItemWithManu = await updateItem(newItem.id, { manufacturerId: manufacturer1.id });
         console.log('Updated Deluxe Widget (with manufacturer linked):', updatedItemWithManu);
-        newItem = updatedItemWithManu; 
+        newItem = updatedItemWithManu;
       }
     } catch (e) {
       console.error("Error in manufacturer creation/linking part of demo:", e);
     }
-
-
+    
+    // Item operations (remains largely the same, ensure items exist for transaction)
     if (newItem && newItem.id) {
       console.log(`\nAttempting to read Deluxe Widget (ID: ${newItem.id})...`);
-      const readResult = await readItem(newItem.id);
-      console.log('Read Deluxe Widget (with details):', readResult);
-
+      await readItem(newItem.id); // Result not stored, just for demo
       console.log(`\nAttempting to update Deluxe Widget (ID: ${newItem.id}) price and quantity...`);
-      const updatedDetails = await updateItem(newItem.id, { price: 179.99, quantity: 45 });
-      console.log('Updated Deluxe Widget (price/quantity):', updatedDetails);
-      newItem = updatedDetails;
-
-      if (newItem.barcode) {
-        console.log(`\nAttempting to get item by barcode: ${newItem.barcode}...`);
-        const itemByBarcode = await getItemByBarcode(newItem.barcode);
-        console.log('Get Item By Barcode Result:', itemByBarcode);
-      }
+      newItem = await updateItem(newItem.id, { price: 179.99, quantity: 45 }); // Update and store
     }
-    
     if (newItem2 && newItem2.id) {
-        console.log(`\nAttempting to read Basic Gadget (ID: ${newItem2.id})...`);
-        const readGadget = await readItem(newItem2.id);
-        console.log('Read Basic Gadget (defaults):', readGadget);
+      console.log(`\nAttempting to read Basic Gadget (ID: ${newItem2.id})...`);
+       await readItem(newItem2.id); // Result not stored
+    }
+
+    // Demonstrate Transaction
+    let transactionId;
+    if (newItem && newItem.id && newItem2 && newItem2.id) {
+      console.log('\n--- Transaction Demonstration ---');
+      const itemsToSell = [
+        { itemId: newItem.id, quantitySold: 2, pricePerUnitAtSale: newItem.price, lineItemTotalPrice: parseFloat(newItem.price) * 2 },
+        { itemId: newItem2.id, quantitySold: 1, pricePerUnitAtSale: newItem2.price, lineItemTotalPrice: parseFloat(newItem2.price) * 1 }
+      ];
+      const overallTotalPrice = itemsToSell.reduce((sum, item) => sum + item.lineItemTotalPrice, 0);
+
+      try {
+        console.log('\nAttempting to record a transaction...');
+        const transactionResult = await recordTransaction(overallTotalPrice, itemsToSell);
+        console.log('Transaction Recorded:', transactionResult);
+        transactionId = transactionResult.transactionId;
+
+        if (transactionId) {
+          console.log(`\nAttempting to get transaction details for ID: ${transactionId}...`);
+          const details = await getTransactionDetails(transactionId);
+          console.log('Transaction Details:', JSON.stringify(details, null, 2));
+        }
+
+        console.log('\nVerifying item quantities after transaction...');
+        const item1AfterSale = await readItem(newItem.id);
+        const item2AfterSale = await readItem(newItem2.id);
+        console.log(`Deluxe Widget quantity after sale (should be 43): ${item1AfterSale ? item1AfterSale.quantity : 'N/A'}`);
+        console.log(`Basic Gadget quantity after sale (should be 99): ${item2AfterSale ? item2AfterSale.quantity : 'N/A'}`);
+
+      } catch (e) {
+        console.error('Error during transaction demonstration:', e);
+      }
+      console.log('--- End Transaction Demonstration ---');
     }
 
 
-      // Demonstrate search (item name should be 'Super Original Item' and have no manu details now)
-      console.log(`\nAttempting to search for items with name containing 'Widget'...`);
-      const searchResults = await searchItemsByName('Widget');
-      console.log('Search Results (should include Deluxe Widget):', searchResults);
-      
-      // Clean up
-      if (newItem && newItem.id) {
-        console.log(`\nAttempting to delete Deluxe Widget (ID: ${newItem.id})...`);
-        await deleteItem(newItem.id);
-        console.log(`Deluxe Widget (ID: ${newItem.id}) deleted.`);
-      }
-      if (newItem2 && newItem2.id) {
-        console.log(`\nAttempting to delete Basic Gadget (ID: ${newItem2.id})...`);
-        await deleteItem(newItem2.id);
-        console.log(`Basic Gadget (ID: ${newItem2.id}) deleted.`);
-      }
+    // Clean up (remains largely the same)
+    if (newItem && newItem.id) {
+      console.log(`\nAttempting to delete Deluxe Widget (ID: ${newItem.id})...`);
+      await deleteItem(newItem.id);
+    }
+    if (newItem2 && newItem2.id) {
+      console.log(`\nAttempting to delete Basic Gadget (ID: ${newItem2.id})...`);
+      await deleteItem(newItem2.id);
+    }
+    if (manufacturer1 && manufacturer1.id) {
+      console.log(`\nAttempting to delete manufacturer (ID: ${manufacturer1.id})...`);
+      await deleteManufacturer(manufacturer1.id);
+    }
 
-
-      // Demonstrate searching manufacturers
-      if (manufacturer1 && manufacturer1.id) {
-        console.log(`\nAttempting to search for manufacturer with text 'Awesome'...`);
-        const searchManuResults = await searchManufacturers('Awesome');
-        console.log('Search Manufacturer Results (should find Awesome Inc.):', searchManuResults);
-        
-        // Clean up: delete the manufacturer
-        console.log(`\nAttempting to delete manufacturer with ID: ${manufacturer1.id}...`);
-        const deleteManuResult = await deleteManufacturer(manufacturer1.id);
-        console.log('Manufacturer Deletion Result:', deleteManuResult);
-      }
-
-    } catch (error) {
-    console.error('Error in CRUD demonstration:', error);
+  } catch (error) {
+    console.error('Error in overall CRUD demonstration:', error);
   } finally {
     console.log('\nCRUD demonstration finished. Closing connection pool.');
     await pool.end(); // Ensure pool is closed

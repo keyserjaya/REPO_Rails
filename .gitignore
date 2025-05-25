@@ -1,0 +1,7 @@
+# Environment variables
+# Do not commit this file to version control as it contains sensitive credentials.
+.env
+
+# Dependencies
+# Installed dependencies, typically can be regenerated from package-lock.json
+node_modules/

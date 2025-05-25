@@ -79,6 +79,31 @@ CREATE INDEX idx_manufacturers_name_gist ON manufacturers USING gist (name gist_
 DROP INDEX IF EXISTS idx_manufacturers_address_gist;
 CREATE INDEX idx_manufacturers_address_gist ON manufacturers USING gist (address gist_trgm_ops);
 
+-- Create 'transactions' table if it doesn't already exist.
+CREATE TABLE IF NOT EXISTS transactions (
+    id SERIAL PRIMARY KEY,
+    transaction_date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    overall_total_price DECIMAL(10, 2) NOT NULL
+);
+
+-- Create 'transaction_items' table if it doesn't already exist.
+-- This table links items to transactions and stores sale-specific details.
+CREATE TABLE IF NOT EXISTS transaction_items (
+    id SERIAL PRIMARY KEY,
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
+    quantity_sold INTEGER NOT NULL,
+    price_per_unit_at_sale DECIMAL(10, 2) NOT NULL,
+    line_item_total_price DECIMAL(10, 2) NOT NULL -- This is quantity_sold * price_per_unit_at_sale
+);
+
+-- Create indexes for 'transaction_items' table to improve query performance.
+DROP INDEX IF EXISTS idx_transaction_items_transaction_id;
+CREATE INDEX idx_transaction_items_transaction_id ON transaction_items(transaction_id);
+
+DROP INDEX IF EXISTS idx_transaction_items_item_id;
+CREATE INDEX idx_transaction_items_item_id ON transaction_items(item_id);
+
 -- Optional: You might want to add some initial sample data for testing.
 -- Example:
 -- INSERT INTO manufacturers (name, address) VALUES ('Awesome Corp', '123 Innovation Drive');
